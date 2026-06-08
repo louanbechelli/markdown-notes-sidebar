@@ -12,6 +12,7 @@ class NotesViewProvider {
     this.context = context;
     this.view = undefined;
     this.mode = 'list';
+    this.messageQueue = Promise.resolve();
   }
 
   async resolveWebviewView(webviewView) {
@@ -25,46 +26,54 @@ class NotesViewProvider {
       webviewView.webview.html = getErrorHtml(error);
     }
 
-    webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (message.type === 'createNote') {
-        await this.createNote();
-        return;
-      }
-
-      if (message.type === 'selectNote') {
-        await this.setActiveNote(message.id);
-        return;
-      }
-
-      if (message.type === 'showList') {
-        this.updateChrome('list');
-        return;
-      }
-
-      if (message.type === 'renameNote') {
-        await this.renameNote(message.id, message.title);
-        return;
-      }
-
-      if (message.type === 'saveContent') {
-        await this.saveContent(message.id, message.content);
-        return;
-      }
-
-      if (message.type === 'deleteNote') {
-        await this.deleteNote(message.id);
-        return;
-      }
-
-      if (message.type === 'saveSettings') {
-        await this.saveSettings(message.settings);
-        return;
-      }
-
-      if (message.type === 'selectFolder') {
-        await this.selectFolder();
-      }
+    webviewView.webview.onDidReceiveMessage((message) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleMessage(message))
+        .catch((error) => {
+          vscode.window.showErrorMessage(`Erro no bloco de notas: ${error.message || String(error)}`);
+        });
     });
+  }
+
+  async handleMessage(message) {
+    if (message.type === 'createNote') {
+      await this.createNote();
+      return;
+    }
+
+    if (message.type === 'selectNote') {
+      await this.setActiveNote(message.id);
+      return;
+    }
+
+    if (message.type === 'showList') {
+      this.updateChrome('list');
+      return;
+    }
+
+    if (message.type === 'renameNote') {
+      await this.renameNote(message.id, message.title);
+      return;
+    }
+
+    if (message.type === 'saveContent') {
+      await this.saveContent(message.id, message.content);
+      return;
+    }
+
+    if (message.type === 'deleteNote') {
+      await this.deleteNote(message.id);
+      return;
+    }
+
+    if (message.type === 'saveSettings') {
+      await this.saveSettings(message.settings);
+      return;
+    }
+
+    if (message.type === 'selectFolder') {
+      await this.selectFolder();
+    }
   }
 
   async createNote() {
@@ -104,12 +113,24 @@ class NotesViewProvider {
     }
 
     const cleanTitle = normalizeTitle(title);
-    const oldUri = vscode.Uri.joinPath(folder, id);
-    const oldTitle = basenameWithoutMd(id);
+    let currentId = id;
+    let oldUri = vscode.Uri.joinPath(folder, currentId);
+    const activeNoteId = this.context.globalState.get(ACTIVE_NOTE_KEY);
+
+    if (!await fileExists(oldUri) && typeof activeNoteId === 'string') {
+      const activeUri = vscode.Uri.joinPath(folder, activeNoteId);
+
+      if (await fileExists(activeUri)) {
+        currentId = activeNoteId;
+        oldUri = activeUri;
+      }
+    }
+
+    const oldTitle = basenameWithoutMd(currentId);
     let nextFileName = `${toSafeFileName(cleanTitle)}.md`;
 
-    if (nextFileName !== id) {
-      nextFileName = await this.getAvailableFileName(folder, cleanTitle, id);
+    if (nextFileName !== currentId) {
+      nextFileName = await this.getAvailableFileName(folder, cleanTitle, currentId);
       await vscode.workspace.fs.rename(oldUri, vscode.Uri.joinPath(folder, nextFileName), { overwrite: false });
       await this.context.globalState.update(ACTIVE_NOTE_KEY, nextFileName);
     }
@@ -125,7 +146,24 @@ class NotesViewProvider {
       return;
     }
 
-    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, id), Buffer.from(content ?? '', 'utf8'));
+    let targetId = id;
+    let targetUri = vscode.Uri.joinPath(folder, targetId);
+    const activeNoteId = this.context.globalState.get(ACTIVE_NOTE_KEY);
+
+    if (!await fileExists(targetUri) && typeof activeNoteId === 'string') {
+      const activeUri = vscode.Uri.joinPath(folder, activeNoteId);
+
+      if (await fileExists(activeUri)) {
+        targetId = activeNoteId;
+        targetUri = activeUri;
+      }
+    }
+
+    try {
+      await vscode.workspace.fs.writeFile(targetUri, Buffer.from(content ?? '', 'utf8'));
+    } catch (error) {
+      vscode.window.showErrorMessage(`Nao foi possivel salvar a nota "${targetId}": ${error.message || String(error)}`);
+    }
   }
 
   async deleteNote(id) {
