@@ -42,7 +42,7 @@ class NotesViewProvider {
     }
 
     if (message.type === 'selectNote') {
-      await this.setActiveNote(message.id);
+      await this.setActiveNote(message.id, message.title);
       return;
     }
 
@@ -93,16 +93,13 @@ class NotesViewProvider {
     await this.postState({ notes: [note, ...state.notes], activeNoteId: fileName, folderPath: folder.fsPath });
   }
 
-  async setActiveNote(id) {
-    const state = await this.getState();
-    const note = state.notes.find((item) => item.id === id);
-
-    if (!note) {
+  async setActiveNote(id, title) {
+    if (typeof id !== 'string' || !id) {
       return;
     }
 
+    this.updateChrome('editor', title || basenameWithoutMd(id));
     await this.context.globalState.update(ACTIVE_NOTE_KEY, id);
-    this.updateChrome('editor', note.title);
   }
 
   async renameNote(id, title) {
@@ -698,10 +695,11 @@ class NotesViewProvider {
 
       function selectNote(id) {
         flushPendingSaves();
+        const selectedNote = state.notes.find((note) => note.id === id);
         state.activeNoteId = id;
         screen = 'editor';
         render();
-        vscode.postMessage({ type: 'selectNote', id });
+        vscode.postMessage({ type: 'selectNote', id, title: selectedNote?.title });
         status.textContent = 'Pronto';
         contentInput.focus();
       }
@@ -840,7 +838,8 @@ class NotesViewProvider {
           if (state.notes.length > oldCount) {
             screen = 'editor';
             if (state.activeNoteId) {
-              vscode.postMessage({ type: 'selectNote', id: state.activeNoteId });
+              const activeNote = getActiveNote();
+              vscode.postMessage({ type: 'selectNote', id: state.activeNoteId, title: activeNote?.title });
             }
           }
           render();
