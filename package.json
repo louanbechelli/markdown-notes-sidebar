@@ -25,6 +25,7 @@
     "onCommand:meuBlocoDeNotas.openSettings",
     "onCommand:meuBlocoDeNotas.selectFolder",
     "onCommand:meuBlocoDeNotas.goBack",
+    "onCommand:meuBlocoDeNotas.openCssPreview",
     "onView:meuBlocoDeNotas.notesView"
   ],
   "main": "./src/extension.js",
@@ -56,6 +57,10 @@
         "command": "meuBlocoDeNotas.selectFolder",
         "title": "Meu Bloco de Notas: Escolher pasta das notas",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "meuBlocoDeNotas.openCssPreview",
+        "title": "Meu Bloco de Notas: Preview CSS (tema ativo)"
       }
     ],
     "viewsContainers": {

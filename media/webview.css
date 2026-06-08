@@ -83,16 +83,16 @@ body {
 
 .noteItem:hover {
   color: var(--vscode-list-hoverForeground, var(--vscode-foreground));
-  background: rgba(128, 128, 128, 0.18);
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.18));
 }
 
 .noteItem.active {
-  color: var(--vscode-foreground);
-  background: transparent;
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+  background: var(--vscode-list-activeSelectionBackground, transparent);
 }
 
 .noteItem.active:hover {
-  background: rgba(128, 128, 128, 0.18);
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.18));
 }
 
 .noteName {
@@ -166,9 +166,12 @@ body {
   outline: none;
 }
 
-.titleInput:focus,
-.editorInputWrap:focus-within {
+.titleInput:focus {
   outline: 1px solid var(--vscode-focusBorder);
+}
+
+.editorInputWrap:focus-within {
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
 }
 
 .editor {
@@ -220,6 +223,12 @@ textarea {
   font: inherit;
   line-height: 1.45;
   outline: none;
+}
+
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .status,

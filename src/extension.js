@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const vscode = require('vscode');
 
@@ -769,6 +770,64 @@ class NotesViewProvider {
   }
 }
 
+let cssPreviewPanel;
+
+function getCssPreviewHtml(context, webview) {
+  const previewPath = path.join(context.extensionPath, 'preview', 'index.html');
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.css'));
+  const nonce = getNonce();
+  let html = fs.readFileSync(previewPath, 'utf8');
+
+  html = html
+    .replace(
+      '<meta name="viewport"',
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">\n  <meta name="viewport"`
+    )
+    .replace('href="../media/webview.css"', `href="${styleUri}" data-base="${styleUri}"`)
+    .replace('<body class="preview-root theme-dark">', '<body class="preview-root preview-embedded">')
+    .replace('class="vscode-sidebar theme-dark"', 'class="vscode-sidebar"')
+    .replace('<script>', `<script nonce="${nonce}">`);
+
+  return html;
+}
+
+function openCssPreview(context) {
+  if (cssPreviewPanel) {
+    cssPreviewPanel.reveal(vscode.ViewColumn.Beside, true);
+    return;
+  }
+
+  cssPreviewPanel = vscode.window.createWebviewPanel(
+    'meuBlocoDeNotas.cssPreview',
+    'Preview CSS — Bloco de Notas',
+    vscode.ViewColumn.Beside,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(context.extensionUri, 'media'),
+        vscode.Uri.joinPath(context.extensionUri, 'preview')
+      ]
+    }
+  );
+
+  const webview = cssPreviewPanel.webview;
+  webview.html = getCssPreviewHtml(context, webview);
+
+  const cssWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(vscode.Uri.joinPath(context.extensionUri, 'media'), 'webview.css')
+  );
+
+  cssWatcher.onDidChange(() => {
+    cssPreviewPanel?.webview.postMessage({ type: 'reloadCss' });
+  });
+
+  cssPreviewPanel.onDidDispose(() => {
+    cssPreviewPanel = undefined;
+    cssWatcher.dispose();
+  });
+}
+
 function activate(context) {
   const provider = new NotesViewProvider(context);
 
@@ -794,6 +853,9 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('meuBlocoDeNotas.goBack', async () => {
       provider.goBack();
+    }),
+    vscode.commands.registerCommand('meuBlocoDeNotas.openCssPreview', () => {
+      openCssPreview(context);
     })
   );
 }
