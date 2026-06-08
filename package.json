@@ -1,0 +1,103 @@
+{
+  "name": "meu-bloco-de-notas",
+  "displayName": "Meu Bloco de Notas",
+  "description": "Uma extensao open source para criar, editar e organizar notas Markdown na barra lateral do VS Code e Cursor.",
+  "version": "0.0.1",
+  "publisher": "louan",
+  "license": "MIT",
+  "keywords": [
+    "notes",
+    "markdown",
+    "notepad",
+    "sidebar",
+    "cursor",
+    "vscode"
+  ],
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:meuBlocoDeNotas.openNotes",
+    "onCommand:meuBlocoDeNotas.createNote",
+    "onCommand:meuBlocoDeNotas.openSettings",
+    "onCommand:meuBlocoDeNotas.selectFolder",
+    "onCommand:meuBlocoDeNotas.goBack",
+    "onView:meuBlocoDeNotas.notesView"
+  ],
+  "main": "./src/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "meuBlocoDeNotas.openNotes",
+        "title": "Meu Bloco de Notas: Abrir"
+      },
+      {
+        "command": "meuBlocoDeNotas.createNote",
+        "title": "Meu Bloco de Notas: Criar nota",
+        "icon": "$(add)"
+      },
+      {
+        "command": "meuBlocoDeNotas.openSettings",
+        "title": "Meu Bloco de Notas: Configuracoes",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "meuBlocoDeNotas.goBack",
+        "title": "Meu Bloco de Notas: Voltar",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "meuBlocoDeNotas.selectFolder",
+        "title": "Meu Bloco de Notas: Escolher pasta das notas",
+        "icon": "$(folder-opened)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "meuBlocoDeNotas",
+          "title": "Notas",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "meuBlocoDeNotas": [
+        {
+          "type": "webview",
+          "id": "meuBlocoDeNotas.notesView",
+          "name": "Bloco de Notas"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "meuBlocoDeNotas.goBack",
+          "when": "view == meuBlocoDeNotas.notesView && meuBlocoDeNotas.canGoBack",
+          "group": "navigation@0"
+        },
+        {
+          "command": "meuBlocoDeNotas.createNote",
+          "when": "view == meuBlocoDeNotas.notesView && !meuBlocoDeNotas.canGoBack",
+          "group": "navigation@1"
+        },
+        {
+          "command": "meuBlocoDeNotas.openSettings",
+          "when": "view == meuBlocoDeNotas.notesView && !meuBlocoDeNotas.canGoBack",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "node --check src/extension.js"
+  },
+  "devDependencies": {}
+}

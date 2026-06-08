@@ -1,0 +1,971 @@
+const path = require('path');
+const vscode = require('vscode');
+
+const LEGACY_NOTES_KEY = 'meuBlocoDeNotas.notes';
+const ACTIVE_NOTE_KEY = 'meuBlocoDeNotas.activeNoteId';
+const SETTINGS_KEY = 'meuBlocoDeNotas.settings';
+const NOTES_FOLDER_KEY = 'meuBlocoDeNotas.notesFolder';
+const VIEW_ID = 'meuBlocoDeNotas.notesView';
+
+class NotesViewProvider {
+  constructor(context) {
+    this.context = context;
+    this.view = undefined;
+    this.mode = 'list';
+  }
+
+  async resolveWebviewView(webviewView) {
+    this.view = webviewView;
+    webviewView.webview.options = { enableScripts: true };
+
+    try {
+      webviewView.webview.html = await this.getHtml(webviewView.webview);
+      this.updateChrome('list');
+    } catch (error) {
+      webviewView.webview.html = getErrorHtml(error);
+    }
+
+    webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (message.type === 'createNote') {
+        await this.createNote();
+        return;
+      }
+
+      if (message.type === 'selectNote') {
+        await this.setActiveNote(message.id);
+        return;
+      }
+
+      if (message.type === 'showList') {
+        this.updateChrome('list');
+        return;
+      }
+
+      if (message.type === 'renameNote') {
+        await this.renameNote(message.id, message.title);
+        return;
+      }
+
+      if (message.type === 'saveContent') {
+        await this.saveContent(message.id, message.content);
+        return;
+      }
+
+      if (message.type === 'deleteNote') {
+        await this.deleteNote(message.id);
+        return;
+      }
+
+      if (message.type === 'saveSettings') {
+        await this.saveSettings(message.settings);
+        return;
+      }
+
+      if (message.type === 'selectFolder') {
+        await this.selectFolder();
+      }
+    });
+  }
+
+  async createNote() {
+    const folder = await this.ensureFolder();
+
+    if (!folder) {
+      return;
+    }
+
+    const state = await this.getState();
+    const fileName = await this.getAvailableFileName(folder, `Nota ${state.notes.length + 1}`);
+    const note = { id: fileName, title: basenameWithoutMd(fileName), content: '' };
+
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, fileName), Buffer.from('', 'utf8'));
+    await this.context.globalState.update(ACTIVE_NOTE_KEY, fileName);
+    this.updateChrome('editor', note.title);
+    await this.postState({ notes: [note, ...state.notes], activeNoteId: fileName, folderPath: folder.fsPath });
+  }
+
+  async setActiveNote(id) {
+    const state = await this.getState();
+    const note = state.notes.find((item) => item.id === id);
+
+    if (!note) {
+      return;
+    }
+
+    await this.context.globalState.update(ACTIVE_NOTE_KEY, id);
+    this.updateChrome('editor', note.title);
+  }
+
+  async renameNote(id, title) {
+    const folder = this.getFolderUri();
+
+    if (!folder) {
+      return;
+    }
+
+    const cleanTitle = normalizeTitle(title);
+    const oldUri = vscode.Uri.joinPath(folder, id);
+    const oldTitle = basenameWithoutMd(id);
+    let nextFileName = `${toSafeFileName(cleanTitle)}.md`;
+
+    if (nextFileName !== id) {
+      nextFileName = await this.getAvailableFileName(folder, cleanTitle, id);
+      await vscode.workspace.fs.rename(oldUri, vscode.Uri.joinPath(folder, nextFileName), { overwrite: false });
+      await this.context.globalState.update(ACTIVE_NOTE_KEY, nextFileName);
+    }
+
+    this.updateChrome('editor', cleanTitle || oldTitle);
+    await this.postState();
+  }
+
+  async saveContent(id, content) {
+    const folder = this.getFolderUri();
+
+    if (!folder) {
+      return;
+    }
+
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, id), Buffer.from(content ?? '', 'utf8'));
+  }
+
+  async deleteNote(id) {
+    const folder = this.getFolderUri();
+
+    if (!folder) {
+      return;
+    }
+
+    try {
+      await vscode.workspace.fs.delete(vscode.Uri.joinPath(folder, id));
+    } catch (error) {
+      vscode.window.showErrorMessage(`Nao foi possivel excluir a nota: ${error.message || String(error)}`);
+    }
+
+    const state = await this.getState();
+    const activeNoteId = state.notes[0]?.id;
+    await this.context.globalState.update(ACTIVE_NOTE_KEY, activeNoteId);
+    this.updateChrome('list');
+    await this.postState({ ...state, activeNoteId });
+  }
+
+  async selectFolder() {
+    const selection = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: 'Usar esta pasta',
+      title: 'Escolha a pasta das notas Markdown'
+    });
+
+    if (!selection?.[0]) {
+      return;
+    }
+
+    await this.context.globalState.update(NOTES_FOLDER_KEY, selection[0].toString());
+    await this.migrateLegacyNotes(selection[0]);
+    this.updateChrome('list');
+    await this.postState();
+  }
+
+  async ensureFolder() {
+    const folder = this.getFolderUri();
+
+    if (folder) {
+      return folder;
+    }
+
+    await this.selectFolder();
+    return this.getFolderUri();
+  }
+
+  getFolderUri() {
+    const value = this.context.globalState.get(NOTES_FOLDER_KEY);
+    return typeof value === 'string' && value ? vscode.Uri.parse(value) : undefined;
+  }
+
+  async getState() {
+    const folder = this.getFolderUri();
+
+    if (!folder) {
+      return { notes: [], activeNoteId: undefined, folderPath: '' };
+    }
+
+    let entries = [];
+
+    try {
+      entries = await vscode.workspace.fs.readDirectory(folder);
+    } catch {
+      return { notes: [], activeNoteId: undefined, folderPath: folder.fsPath };
+    }
+
+    const notes = [];
+
+    for (const [fileName, fileType] of entries) {
+      if (fileType !== vscode.FileType.File || !fileName.toLowerCase().endsWith('.md')) {
+        continue;
+      }
+
+      const uri = vscode.Uri.joinPath(folder, fileName);
+      const contentBytes = await vscode.workspace.fs.readFile(uri);
+      const stat = await vscode.workspace.fs.stat(uri);
+
+      notes.push({
+        id: fileName,
+        title: basenameWithoutMd(fileName),
+        content: Buffer.from(contentBytes).toString('utf8'),
+        updatedAt: stat.mtime
+      });
+    }
+
+    notes.sort((first, second) => second.updatedAt - first.updatedAt || first.title.localeCompare(second.title));
+
+    const storedActiveId = this.context.globalState.get(ACTIVE_NOTE_KEY);
+    const activeNoteId = notes.some((note) => note.id === storedActiveId) ? storedActiveId : notes[0]?.id;
+
+    return { notes, activeNoteId, folderPath: folder.fsPath };
+  }
+
+  async postState(state) {
+    const nextState = state ?? await this.getState();
+
+    this.view?.webview.postMessage({
+      type: 'setState',
+      state: nextState,
+      settings: this.getSettings()
+    });
+  }
+
+  openSettings() {
+    this.updateChrome('settings');
+    this.view?.webview.postMessage({
+      type: 'openSettings',
+      settings: this.getSettings()
+    });
+  }
+
+  goBack() {
+    this.updateChrome('list');
+    this.view?.webview.postMessage({ type: 'showList' });
+  }
+
+  updateChrome(mode, title) {
+    this.mode = mode;
+    const fallbackTitle = mode === 'settings' ? 'Configuracoes' : 'Bloco de Notas';
+    const viewTitle = mode === 'editor' ? normalizeTitle(title) : fallbackTitle;
+
+    if (this.view) {
+      this.view.title = viewTitle;
+    }
+
+    vscode.commands.executeCommand('setContext', 'meuBlocoDeNotas.canGoBack', mode !== 'list');
+  }
+
+  getSettings() {
+    return normalizeSettings(this.context.globalState.get(SETTINGS_KEY));
+  }
+
+  async saveSettings(settings) {
+    const nextSettings = normalizeSettings(settings);
+    await this.context.globalState.update(SETTINGS_KEY, nextSettings);
+
+    this.view?.webview.postMessage({
+      type: 'setSettings',
+      settings: nextSettings
+    });
+  }
+
+  async getHtml(webview) {
+    const nonce = getNonce();
+    const initialState = encodeURIComponent(JSON.stringify(await this.getState()));
+    const initialSettings = encodeURIComponent(JSON.stringify(this.getSettings()));
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      color-scheme: light dark;
+      box-sizing: border-box;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: inherit;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      padding: 0 4px;
+      overflow: hidden;
+    }
+
+    body {
+      margin: 0;
+      color: var(--vscode-foreground);
+      background: var(--vscode-sideBar-background);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+    }
+
+    .app, .screen {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .app { height: 100vh; }
+    .screen { flex: 1; min-height: 0; }
+    .hidden { display: none; }
+
+    .notesList {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      gap: 0;
+      overflow-y: auto;
+      padding: 0;
+    }
+
+    .noteItem {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      min-height: 24px;
+      border: 0;
+      border-radius: 0;
+      padding: 2px 0;
+      color: var(--vscode-sideBar-foreground);
+      background: transparent;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .noteItem:hover {
+      color: var(--vscode-list-hoverForeground, var(--vscode-foreground));
+      background: transparent;
+    }
+
+    .noteItem.active {
+      color: var(--vscode-foreground);
+      background: transparent;
+    }
+
+    .noteName {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .noteDeleteButton,
+    .folderButton {
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: var(--vscode-icon-foreground);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .noteDeleteButton {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 24px;
+      flex: 0 0 auto;
+      padding: 0;
+      line-height: 1;
+      font-size: 16px;
+      opacity: 0.65;
+    }
+
+    .noteItem:hover .noteDeleteButton,
+    .noteDeleteButton:focus { opacity: 1; }
+    .noteDeleteButton:hover { color: var(--vscode-errorForeground); }
+    .folderButton:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+    .emptyState {
+      padding: 8px 0;
+      color: var(--vscode-descriptionForeground);
+      line-height: 1.4;
+    }
+
+    .folderButton {
+      margin-top: 8px;
+      padding: 4px 0px;
+      color: var(--vscode-button-foreground);
+      background: var(--vscode-button-background);
+    }
+
+    .titleInput {
+      width: calc(100% - 6px);
+      min-width: 0;
+      margin: 4px 3px 0;
+      border: 0;
+      border-radius: 0;
+      padding: 2px 4px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+      font-weight: 600;
+      outline: none;
+    }
+
+    .titleInput:focus,
+    textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
+
+    .editor {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      gap: 6px;
+      padding: 6px 3px;
+    }
+
+    textarea {
+      width: 100%;
+      flex: 1;
+      min-height: 140px;
+      resize: none;
+      border: 0;
+      border-radius: 0;
+      padding: 8px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+      line-height: 1.45;
+      outline: none;
+    }
+
+    .status,
+    .folderPath,
+    .settingRow label {
+      color: var(--vscode-descriptionForeground);
+      font-size: 12px;
+    }
+
+    .settingsPanel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 10px 0px;
+    }
+
+    .settingRow {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .settingRow select,
+    .settingRow input {
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 4px 6px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+      outline: none;
+    }
+
+    .sizeControl {
+      display: grid;
+      grid-template-columns: 1fr 42px;
+      gap: 6px;
+      align-items: center;
+    }
+  </style>
+  <title>Bloco de Notas</title>
+</head>
+<body>
+  <div class="app">
+    <section class="screen" id="listScreen">
+      <div class="notesList" id="notesList" aria-label="Notas"></div>
+    </section>
+
+    <section class="screen hidden" id="editorScreen">
+      <input class="titleInput" id="titleInput" type="text" aria-label="Nome da nota" maxlength="80">
+      <div class="editor">
+        <textarea id="contentInput" spellcheck="true" placeholder="Escreva suas anotacoes em Markdown..."></textarea>
+        <span class="status" id="status">Pronto</span>
+      </div>
+    </section>
+
+    <section class="screen hidden" id="settingsScreen">
+      <div class="settingsPanel">
+        <div class="settingRow">
+          <label>Pasta das notas</label>
+          <button class="folderButton" id="selectFolderButton" type="button">Escolher pasta</button>
+          <span class="folderPath" id="folderPath"></span>
+        </div>
+        <div class="settingRow">
+          <label for="fontFamilyInput">Fonte</label>
+          <select id="fontFamilyInput">
+            <option value="default">Padrao do editor</option>
+            <option value="monospace">Monospace</option>
+            <option value="sans">Sans serif</option>
+            <option value="serif">Serif</option>
+            <option value="custom">Fonte manual</option>
+          </select>
+          <input class="hidden" id="customFontInput" type="text" placeholder="Ex: JetBrains Mono, Fira Code">
+        </div>
+        <div class="settingRow">
+          <label for="fontSizeInput">Tamanho</label>
+          <div class="sizeControl">
+            <input id="fontSizeInput" type="range" min="12" max="24" step="1">
+            <input id="fontSizeNumberInput" type="number" min="12" max="24" step="1">
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script nonce="${nonce}">
+    try {
+      const vscode = acquireVsCodeApi();
+      const listScreen = document.getElementById('listScreen');
+      const editorScreen = document.getElementById('editorScreen');
+      const settingsScreen = document.getElementById('settingsScreen');
+      const notesList = document.getElementById('notesList');
+      const titleInput = document.getElementById('titleInput');
+      const contentInput = document.getElementById('contentInput');
+      const status = document.getElementById('status');
+      const folderPath = document.getElementById('folderPath');
+      const selectFolderButton = document.getElementById('selectFolderButton');
+      const fontFamilyInput = document.getElementById('fontFamilyInput');
+      const customFontInput = document.getElementById('customFontInput');
+      const fontSizeInput = document.getElementById('fontSizeInput');
+      const fontSizeNumberInput = document.getElementById('fontSizeNumberInput');
+      let state = normalizeState(JSON.parse(decodeURIComponent('${initialState}')));
+      let settings = normalizeSettings(JSON.parse(decodeURIComponent('${initialSettings}')));
+      let screen = 'list';
+      let saveContentTimer;
+      let saveTitleTimer;
+
+      function normalizeState(value) {
+        return {
+          notes: Array.isArray(value?.notes) ? value.notes.map((note) => ({
+            id: String(note.id || ''),
+            title: String(note.title || 'Sem titulo'),
+            content: String(note.content || '')
+          })).filter((note) => note.id) : [],
+          activeNoteId: value?.activeNoteId,
+          folderPath: String(value?.folderPath || '')
+        };
+      }
+
+      function normalizeSettings(value) {
+        const allowedFonts = ['default', 'monospace', 'sans', 'serif', 'custom'];
+        const fontFamily = allowedFonts.includes(value?.fontFamily) ? value.fontFamily : 'default';
+        const customFontFamily = String(value?.customFontFamily || '');
+        const fontSize = Math.min(24, Math.max(12, Number(value?.fontSize) || 14));
+        return { fontFamily, customFontFamily, fontSize };
+      }
+
+      function getActiveNote() {
+        return state.notes.find((note) => note.id === state.activeNoteId) || state.notes[0];
+      }
+
+      function render() {
+        const activeNote = getActiveNote();
+        listScreen.classList.toggle('hidden', screen !== 'list');
+        editorScreen.classList.toggle('hidden', screen !== 'editor');
+        settingsScreen.classList.toggle('hidden', screen !== 'settings');
+        notesList.innerHTML = '';
+
+        if (!state.folderPath) {
+          const empty = document.createElement('div');
+          empty.className = 'emptyState';
+          empty.textContent = 'Escolha uma pasta para ler e salvar suas notas .md.';
+          const button = document.createElement('button');
+          button.className = 'folderButton';
+          button.type = 'button';
+          button.textContent = 'Escolher pasta';
+          button.addEventListener('click', () => vscode.postMessage({ type: 'selectFolder' }));
+          notesList.appendChild(empty);
+          notesList.appendChild(button);
+        } else if (state.notes.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'emptyState';
+          empty.textContent = 'Nenhum arquivo .md nesta pasta. Clique no + para criar uma nota.';
+          notesList.appendChild(empty);
+        } else {
+          state.notes.forEach((note) => {
+            const button = document.createElement('div');
+            button.className = 'noteItem' + (note.id === state.activeNoteId ? ' active' : '');
+            button.setAttribute('role', 'button');
+            button.tabIndex = 0;
+            button.title = note.title;
+
+            const name = document.createElement('span');
+            name.className = 'noteName';
+            name.textContent = note.title;
+            button.appendChild(name);
+
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'noteDeleteButton';
+            deleteButton.type = 'button';
+            deleteButton.title = 'Excluir nota';
+            deleteButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 0h24v24H0z" fill="none"></path><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16m-10 4v6m4-6v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"></path></svg>';
+            deleteButton.addEventListener('mousedown', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            });
+            deleteButton.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              deleteNote(note.id);
+            });
+            button.appendChild(deleteButton);
+
+            button.addEventListener('click', (event) => {
+              if (event.target.closest('.noteDeleteButton')) {
+                return;
+              }
+              selectNote(note.id);
+            });
+            button.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectNote(note.id);
+              }
+            });
+            notesList.appendChild(button);
+          });
+        }
+
+        if (activeNote) {
+          titleInput.value = activeNote.title;
+          contentInput.value = activeNote.content;
+        }
+
+        folderPath.textContent = state.folderPath || 'Nenhuma pasta selecionada';
+        applySettings();
+      }
+
+      function selectNote(id) {
+        flushPendingSaves();
+        state.activeNoteId = id;
+        screen = 'editor';
+        render();
+        vscode.postMessage({ type: 'selectNote', id });
+        status.textContent = 'Pronto';
+        contentInput.focus();
+      }
+
+      function updateLocalNote(fields) {
+        const note = getActiveNote();
+        if (note) {
+          Object.assign(note, fields);
+        }
+        return note;
+      }
+
+      function scheduleContentSave() {
+        const note = updateLocalNote({ content: contentInput.value });
+        if (!note) return;
+        status.textContent = 'Salvando...';
+        window.clearTimeout(saveContentTimer);
+        saveContentTimer = window.setTimeout(() => {
+          vscode.postMessage({ type: 'saveContent', id: note.id, content: note.content });
+          status.textContent = 'Salvo';
+        }, 250);
+      }
+
+      function scheduleTitleSave() {
+        const title = titleInput.value.trim() || 'Sem titulo';
+        const note = updateLocalNote({ title });
+        if (!note) return;
+        renderListOnly();
+        status.textContent = 'Renomeando...';
+        window.clearTimeout(saveTitleTimer);
+        saveTitleTimer = window.setTimeout(() => {
+          vscode.postMessage({ type: 'saveContent', id: note.id, content: contentInput.value });
+          vscode.postMessage({ type: 'renameNote', id: note.id, title: note.title });
+          status.textContent = 'Salvo';
+        }, 450);
+      }
+
+      function renderListOnly() {
+        const currentTitle = titleInput.value;
+        const currentContent = contentInput.value;
+        render();
+        titleInput.value = currentTitle;
+        contentInput.value = currentContent;
+      }
+
+      function flushPendingSaves() {
+        if (screen !== 'editor') return;
+        const note = updateLocalNote({
+          title: titleInput.value.trim() || 'Sem titulo',
+          content: contentInput.value
+        });
+        if (!note) return;
+        window.clearTimeout(saveContentTimer);
+        window.clearTimeout(saveTitleTimer);
+        vscode.postMessage({ type: 'saveContent', id: note.id, content: note.content });
+        vscode.postMessage({ type: 'renameNote', id: note.id, title: note.title });
+      }
+
+      function deleteNote(id) {
+        const note = state.notes.find((item) => item.id === id);
+        if (!note) return;
+
+        window.clearTimeout(saveContentTimer);
+        window.clearTimeout(saveTitleTimer);
+        state.notes = state.notes.filter((item) => item.id !== id);
+        if (state.activeNoteId === id) {
+          state.activeNoteId = state.notes[0]?.id;
+        }
+        showList();
+        vscode.postMessage({ type: 'deleteNote', id });
+      }
+
+      function showList() {
+        flushPendingSaves();
+        screen = 'list';
+        render();
+        vscode.postMessage({ type: 'showList' });
+      }
+
+      function openSettings() {
+        flushPendingSaves();
+        screen = 'settings';
+        renderSettings();
+        render();
+      }
+
+      function renderSettings() {
+        fontFamilyInput.value = settings.fontFamily;
+        customFontInput.value = settings.customFontFamily;
+        customFontInput.classList.toggle('hidden', settings.fontFamily !== 'custom');
+        fontSizeInput.value = String(settings.fontSize);
+        fontSizeNumberInput.value = String(settings.fontSize);
+      }
+
+      function applySettings() {
+        const fontMap = {
+          default: 'var(--vscode-editor-font-family, var(--vscode-font-family))',
+          monospace: 'var(--vscode-editor-font-family, Consolas, monospace)',
+          sans: 'var(--vscode-font-family, Arial, sans-serif)',
+          serif: 'Georgia, serif',
+          custom: settings.customFontFamily || 'var(--vscode-editor-font-family, var(--vscode-font-family))'
+        };
+        contentInput.style.fontFamily = fontMap[settings.fontFamily] || fontMap.default;
+        contentInput.style.fontSize = settings.fontSize + 'px';
+      }
+
+      function saveSettings() {
+        settings = normalizeSettings({
+          fontFamily: fontFamilyInput.value,
+          customFontFamily: customFontInput.value,
+          fontSize: fontSizeNumberInput.value
+        });
+        renderSettings();
+        applySettings();
+        vscode.postMessage({ type: 'saveSettings', settings });
+      }
+
+      titleInput.addEventListener('input', scheduleTitleSave);
+      contentInput.addEventListener('input', scheduleContentSave);
+      selectFolderButton.addEventListener('click', () => vscode.postMessage({ type: 'selectFolder' }));
+      fontFamilyInput.addEventListener('change', saveSettings);
+      customFontInput.addEventListener('input', saveSettings);
+      fontSizeInput.addEventListener('input', () => {
+        fontSizeNumberInput.value = fontSizeInput.value;
+        saveSettings();
+      });
+      fontSizeNumberInput.addEventListener('input', () => {
+        fontSizeInput.value = fontSizeNumberInput.value;
+        saveSettings();
+      });
+
+      window.addEventListener('message', (event) => {
+        if (event.data.type === 'setState') {
+          const oldCount = state.notes.length;
+          state = normalizeState(event.data.state);
+          if (state.notes.length > oldCount) {
+            screen = 'editor';
+            if (state.activeNoteId) {
+              vscode.postMessage({ type: 'selectNote', id: state.activeNoteId });
+            }
+          }
+          render();
+          status.textContent = 'Pronto';
+        }
+
+        if (event.data.type === 'setSettings') {
+          settings = normalizeSettings(event.data.settings);
+          renderSettings();
+          applySettings();
+        }
+
+        if (event.data.type === 'openSettings') {
+          settings = normalizeSettings(event.data.settings);
+          openSettings();
+        }
+
+        if (event.data.type === 'showList') {
+          showList();
+        }
+      });
+
+      renderSettings();
+      applySettings();
+      render();
+    } catch (error) {
+      document.body.innerHTML = '<div style="padding:12px 0;">Erro ao carregar notas: ' + String(error.message || error) + '</div>';
+    }
+  </script>
+</body>
+</html>`;
+  }
+
+  async getAvailableFileName(folder, title, currentFileName) {
+    const baseName = toSafeFileName(title);
+    let fileName = `${baseName}.md`;
+    let suffix = 2;
+
+    while (fileName !== currentFileName && await fileExists(vscode.Uri.joinPath(folder, fileName))) {
+      fileName = `${baseName}-${suffix}.md`;
+      suffix += 1;
+    }
+
+    return fileName;
+  }
+
+  async migrateLegacyNotes(folder) {
+    const legacyNotes = this.context.globalState.get(LEGACY_NOTES_KEY);
+
+    if (!Array.isArray(legacyNotes) || legacyNotes.length === 0) {
+      return;
+    }
+
+    for (const note of legacyNotes) {
+      const title = normalizeTitle(note?.title);
+      const fileName = await this.getAvailableFileName(folder, title);
+      const content = typeof note?.content === 'string' ? note.content : '';
+      await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, fileName), Buffer.from(content, 'utf8'));
+    }
+
+    await this.context.globalState.update(LEGACY_NOTES_KEY, []);
+  }
+}
+
+function activate(context) {
+  const provider = new NotesViewProvider(context);
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(VIEW_ID, provider),
+    vscode.commands.registerCommand('meuBlocoDeNotas.openNotes', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.meuBlocoDeNotas');
+    }),
+    vscode.commands.registerCommand('meuBlocoDeNotas.createNote', async () => {
+      await provider.createNote();
+      await vscode.commands.executeCommand('workbench.view.extension.meuBlocoDeNotas');
+    }),
+    vscode.commands.registerCommand('meuBlocoDeNotas.openSettings', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.meuBlocoDeNotas');
+      provider.openSettings();
+      setTimeout(() => provider.openSettings(), 100);
+    }),
+    vscode.commands.registerCommand('meuBlocoDeNotas.selectFolder', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.meuBlocoDeNotas');
+      await provider.selectFolder();
+    }),
+    vscode.commands.registerCommand('meuBlocoDeNotas.goBack', async () => {
+      provider.goBack();
+    })
+  );
+}
+
+function deactivate() {}
+
+function normalizeTitle(title) {
+  const text = typeof title === 'string' ? title.trim() : '';
+  return text || 'Sem titulo';
+}
+
+function normalizeSettings(settings) {
+  const allowedFonts = ['default', 'monospace', 'sans', 'serif', 'custom'];
+  const fontFamily = allowedFonts.includes(settings?.fontFamily) ? settings.fontFamily : 'default';
+  const customFontFamily = typeof settings?.customFontFamily === 'string' ? settings.customFontFamily.trim() : '';
+  const fontSize = Math.min(24, Math.max(12, Number(settings?.fontSize) || 14));
+
+  return { fontFamily, customFontFamily, fontSize };
+}
+
+function toSafeFileName(title) {
+  const safeName = normalizeTitle(title)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/\.+$/g, '')
+    .trim();
+
+  return safeName || 'Nota';
+}
+
+function basenameWithoutMd(fileName) {
+  return path.basename(fileName, path.extname(fileName));
+}
+
+async function fileExists(uri) {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getNonce() {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+  for (let index = 0; index < 32; index += 1) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+
+  return text;
+}
+
+function getErrorHtml(error) {
+  const message = escapeHtml(error?.message || String(error));
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<body>
+  <div style="padding:12px 0;font-family:sans-serif;">
+    Erro ao abrir o bloco de notas: ${message}
+  </div>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+module.exports = {
+  activate,
+  deactivate
+};
