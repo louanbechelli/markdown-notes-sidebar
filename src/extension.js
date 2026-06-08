@@ -233,24 +233,22 @@ class NotesViewProvider {
       return { notes: [], activeNoteId: undefined, folderPath: folder.fsPath };
     }
 
-    const notes = [];
+    const notes = await Promise.all(entries
+      .filter(([fileName, fileType]) => fileType === vscode.FileType.File && fileName.toLowerCase().endsWith('.md'))
+      .map(async ([fileName]) => {
+        const uri = vscode.Uri.joinPath(folder, fileName);
+        const [contentBytes, stat] = await Promise.all([
+          vscode.workspace.fs.readFile(uri),
+          vscode.workspace.fs.stat(uri)
+        ]);
 
-    for (const [fileName, fileType] of entries) {
-      if (fileType !== vscode.FileType.File || !fileName.toLowerCase().endsWith('.md')) {
-        continue;
-      }
-
-      const uri = vscode.Uri.joinPath(folder, fileName);
-      const contentBytes = await vscode.workspace.fs.readFile(uri);
-      const stat = await vscode.workspace.fs.stat(uri);
-
-      notes.push({
-        id: fileName,
-        title: basenameWithoutMd(fileName),
-        content: Buffer.from(contentBytes).toString('utf8'),
-        updatedAt: stat.mtime
-      });
-    }
+        return {
+          id: fileName,
+          title: basenameWithoutMd(fileName),
+          content: Buffer.from(contentBytes).toString('utf8'),
+          updatedAt: stat.mtime
+        };
+      }));
 
     notes.sort((first, second) => second.updatedAt - first.updatedAt || first.title.localeCompare(second.title));
 
@@ -818,7 +816,9 @@ class NotesViewProvider {
       }
 
       titleInput.addEventListener('input', scheduleTitleSave);
+      titleInput.addEventListener('blur', flushPendingSaves);
       contentInput.addEventListener('input', scheduleContentSave);
+      contentInput.addEventListener('blur', flushPendingSaves);
       selectFolderButton.addEventListener('click', () => vscode.postMessage({ type: 'selectFolder' }));
       fontFamilyInput.addEventListener('change', saveSettings);
       customFontInput.addEventListener('input', saveSettings);
@@ -829,6 +829,13 @@ class NotesViewProvider {
       fontSizeNumberInput.addEventListener('input', () => {
         fontSizeInput.value = fontSizeNumberInput.value;
         saveSettings();
+      });
+      window.addEventListener('blur', flushPendingSaves);
+      window.addEventListener('pagehide', flushPendingSaves);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          flushPendingSaves();
+        }
       });
 
       window.addEventListener('message', (event) => {
@@ -908,7 +915,9 @@ function activate(context) {
   const provider = new NotesViewProvider(context);
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(VIEW_ID, provider),
+    vscode.window.registerWebviewViewProvider(VIEW_ID, provider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
     vscode.commands.registerCommand('meuBlocoDeNotas.openNotes', async () => {
       await vscode.commands.executeCommand('workbench.view.extension.meuBlocoDeNotas');
     }),
