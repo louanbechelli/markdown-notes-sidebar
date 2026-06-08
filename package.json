@@ -97,7 +97,8 @@
     }
   },
   "scripts": {
-    "lint": "node --check src/extension.js"
+    "lint": "node --check src/extension.js",
+    "preview": "start preview/index.html"
   },
   "devDependencies": {}
 }

@@ -1,0 +1,263 @@
+:root {
+  color-scheme: light dark;
+  box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+body,
+.vscode-sidebar-body {
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.app,
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+}
+
+.app {
+  height: 100vh;
+}
+
+.screen {
+  flex: 1;
+  min-height: 0;
+}
+
+.hidden {
+  display: none;
+}
+
+.notesList {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.noteItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 24px;
+  border: 0;
+  border-radius: 2px;
+  padding: 1px 0 2px 1px;
+  color: var(--vscode-sideBar-foreground);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.noteItem:hover {
+  color: var(--vscode-list-hoverForeground, var(--vscode-foreground));
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.noteItem.active {
+  color: var(--vscode-foreground);
+  background: transparent;
+}
+
+.noteItem.active:hover {
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.noteName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noteDeleteButton,
+.folderButton {
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--vscode-icon-foreground);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.noteDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  flex: 0 0 auto;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  opacity: 0.65;
+}
+
+.noteItem:hover .noteDeleteButton,
+.noteDeleteButton:focus {
+  opacity: 1;
+}
+
+.noteDeleteButton:hover {
+  color: var(--vscode-errorForeground);
+}
+
+.folderButton:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.emptyState {
+  padding: 8px 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.4;
+}
+
+.folderButton {
+  margin-top: 8px;
+  padding: 4px 0px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+.titleInput {
+  width: calc(100% - 6px);
+  min-width: 0;
+  margin: 4px 3px 0;
+  border: 0;
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+  font-weight: 600;
+  outline: none;
+}
+
+.titleInput:focus,
+.editorInputWrap:focus-within {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 3px;
+}
+
+.editorInputWrap {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  min-height: 140px;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--vscode-input-background);
+}
+
+.lineNumbers {
+  flex: 0 0 auto;
+  min-width: 3ch;
+  padding: 8px 6px 8px 0;
+  border-right: 1px solid var(--vscode-input-border, transparent);
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-input-background);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  overflow: hidden;
+}
+
+textarea {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  padding: 8px;
+  color: var(--vscode-input-foreground);
+  background: transparent;
+  font: inherit;
+  line-height: 1.45;
+  outline: none;
+}
+
+.status,
+.folderPath,
+.settingRow label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.settingsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 0px;
+}
+
+.settingRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.settingRow select,
+.settingRow input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  font: inherit;
+  outline: none;
+}
+
+.sizeControl {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 6px;
+  align-items: center;
+}

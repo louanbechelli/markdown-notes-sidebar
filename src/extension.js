@@ -110,17 +110,11 @@ class NotesViewProvider {
     }
 
     const cleanTitle = normalizeTitle(title);
-    let currentId = id;
-    let oldUri = vscode.Uri.joinPath(folder, currentId);
-    const activeNoteId = this.context.globalState.get(ACTIVE_NOTE_KEY);
+    const currentId = id;
+    const oldUri = vscode.Uri.joinPath(folder, currentId);
 
-    if (!await fileExists(oldUri) && typeof activeNoteId === 'string') {
-      const activeUri = vscode.Uri.joinPath(folder, activeNoteId);
-
-      if (await fileExists(activeUri)) {
-        currentId = activeNoteId;
-        oldUri = activeUri;
-      }
+    if (!await fileExists(oldUri)) {
+      return;
     }
 
     const oldTitle = basenameWithoutMd(currentId);
@@ -143,17 +137,11 @@ class NotesViewProvider {
       return;
     }
 
-    let targetId = id;
-    let targetUri = vscode.Uri.joinPath(folder, targetId);
-    const activeNoteId = this.context.globalState.get(ACTIVE_NOTE_KEY);
+    const targetId = id;
+    const targetUri = vscode.Uri.joinPath(folder, targetId);
 
-    if (!await fileExists(targetUri) && typeof activeNoteId === 'string') {
-      const activeUri = vscode.Uri.joinPath(folder, activeNoteId);
-
-      if (await fileExists(activeUri)) {
-        targetId = activeNoteId;
-        targetUri = activeUri;
-      }
+    if (!await fileExists(targetUri)) {
+      return;
     }
 
     try {
@@ -309,6 +297,7 @@ class NotesViewProvider {
 
   async getHtml(webview) {
     const nonce = getNonce();
+    const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'webview.css'));
     const initialState = encodeURIComponent(JSON.stringify(await this.getState()));
     const initialSettings = encodeURIComponent(JSON.stringify(this.getSettings()));
 
@@ -316,213 +305,9 @@ class NotesViewProvider {
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    :root {
-      color-scheme: light dark;
-      box-sizing: border-box;
-    }
-
-    *,
-    *::before,
-    *::after {
-      box-sizing: inherit;
-    }
-
-    html,
-    body {
-      width: 100%;
-      height: 100%;
-      padding: 0 4px;
-      overflow: hidden;
-    }
-
-    body {
-      margin: 0;
-      color: var(--vscode-foreground);
-      background: var(--vscode-sideBar-background);
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-    }
-
-    .app, .screen {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      width: 100%;
-    }
-
-    .app { height: 100vh; }
-    .screen { flex: 1; min-height: 0; }
-    .hidden { display: none; }
-
-    .notesList {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-      flex-direction: column;
-      gap: 0;
-      overflow-y: auto;
-      padding: 0;
-    }
-
-    .noteItem {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      width: 100%;
-      min-height: 24px;
-      border: 0;
-      border-radius: 0;
-      padding: 2px 0;
-      color: var(--vscode-sideBar-foreground);
-      background: transparent;
-      font: inherit;
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .noteItem:hover {
-      color: var(--vscode-list-hoverForeground, var(--vscode-foreground));
-      background: transparent;
-    }
-
-    .noteItem.active {
-      color: var(--vscode-foreground);
-      background: transparent;
-    }
-
-    .noteName {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .noteDeleteButton,
-    .folderButton {
-      border: 1px solid transparent;
-      border-radius: 3px;
-      color: var(--vscode-icon-foreground);
-      background: transparent;
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .noteDeleteButton {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 24px;
-      flex: 0 0 auto;
-      padding: 0;
-      line-height: 1;
-      font-size: 16px;
-      opacity: 0.65;
-    }
-
-    .noteItem:hover .noteDeleteButton,
-    .noteDeleteButton:focus { opacity: 1; }
-    .noteDeleteButton:hover { color: var(--vscode-errorForeground); }
-    .folderButton:hover { background: var(--vscode-toolbar-hoverBackground); }
-
-    .emptyState {
-      padding: 8px 0;
-      color: var(--vscode-descriptionForeground);
-      line-height: 1.4;
-    }
-
-    .folderButton {
-      margin-top: 8px;
-      padding: 4px 0px;
-      color: var(--vscode-button-foreground);
-      background: var(--vscode-button-background);
-    }
-
-    .titleInput {
-      width: calc(100% - 6px);
-      min-width: 0;
-      margin: 4px 3px 0;
-      border: 0;
-      border-radius: 0;
-      padding: 2px 4px;
-      color: var(--vscode-input-foreground);
-      background: var(--vscode-input-background);
-      font: inherit;
-      font-weight: 600;
-      outline: none;
-    }
-
-    .titleInput:focus,
-    textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
-
-    .editor {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-      flex-direction: column;
-      gap: 6px;
-      padding: 6px 3px;
-    }
-
-    textarea {
-      width: 100%;
-      flex: 1;
-      min-height: 140px;
-      resize: none;
-      border: 0;
-      border-radius: 0;
-      padding: 8px;
-      color: var(--vscode-input-foreground);
-      background: var(--vscode-input-background);
-      font: inherit;
-      line-height: 1.45;
-      outline: none;
-    }
-
-    .status,
-    .folderPath,
-    .settingRow label {
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-    }
-
-    .settingsPanel {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding: 10px 0px;
-    }
-
-    .settingRow {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-
-    .settingRow select,
-    .settingRow input {
-      box-sizing: border-box;
-      width: 100%;
-      border: 1px solid var(--vscode-input-border, transparent);
-      border-radius: 3px;
-      padding: 4px 6px;
-      color: var(--vscode-input-foreground);
-      background: var(--vscode-input-background);
-      font: inherit;
-      outline: none;
-    }
-
-    .sizeControl {
-      display: grid;
-      grid-template-columns: 1fr 42px;
-      gap: 6px;
-      align-items: center;
-    }
-  </style>
+  <link rel="stylesheet" href="${styleUri}">
   <title>Bloco de Notas</title>
 </head>
 <body>
@@ -534,7 +319,10 @@ class NotesViewProvider {
     <section class="screen hidden" id="editorScreen">
       <input class="titleInput" id="titleInput" type="text" aria-label="Nome da nota" maxlength="80">
       <div class="editor">
-        <textarea id="contentInput" spellcheck="true" placeholder="Escreva suas anotacoes em Markdown..."></textarea>
+        <div class="editorInputWrap">
+          <div class="lineNumbers" id="lineNumbers" aria-hidden="true">1</div>
+          <textarea id="contentInput" spellcheck="true" placeholder="Escreva suas anotacoes em Markdown..."></textarea>
+        </div>
         <span class="status" id="status">Pronto</span>
       </div>
     </section>
@@ -577,6 +365,7 @@ class NotesViewProvider {
       const notesList = document.getElementById('notesList');
       const titleInput = document.getElementById('titleInput');
       const contentInput = document.getElementById('contentInput');
+      const lineNumbers = document.getElementById('lineNumbers');
       const status = document.getElementById('status');
       const folderPath = document.getElementById('folderPath');
       const selectFolderButton = document.getElementById('selectFolderButton');
@@ -584,11 +373,15 @@ class NotesViewProvider {
       const customFontInput = document.getElementById('customFontInput');
       const fontSizeInput = document.getElementById('fontSizeInput');
       const fontSizeNumberInput = document.getElementById('fontSizeNumberInput');
+      const lineMeasure = document.createElement('div');
       let state = normalizeState(JSON.parse(decodeURIComponent('${initialState}')));
       let settings = normalizeSettings(JSON.parse(decodeURIComponent('${initialSettings}')));
       let screen = 'list';
       let saveContentTimer;
       let saveTitleTimer;
+
+      lineMeasure.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(lineMeasure);
 
       function normalizeState(value) {
         return {
@@ -689,6 +482,7 @@ class NotesViewProvider {
 
         folderPath.textContent = state.folderPath || 'Nenhuma pasta selecionada';
         applySettings();
+        updateLineNumbers();
       }
 
       function selectNote(id) {
@@ -713,6 +507,7 @@ class NotesViewProvider {
       function scheduleContentSave() {
         const note = updateLocalNote({ content: contentInput.value });
         if (!note) return;
+        updateLineNumbers();
         status.textContent = 'Salvando...';
         window.clearTimeout(saveContentTimer);
         saveContentTimer = window.setTimeout(() => {
@@ -741,6 +536,7 @@ class NotesViewProvider {
         render();
         titleInput.value = currentTitle;
         contentInput.value = currentContent;
+        updateLineNumbers();
       }
 
       function flushPendingSaves() {
@@ -802,6 +598,63 @@ class NotesViewProvider {
         };
         contentInput.style.fontFamily = fontMap[settings.fontFamily] || fontMap.default;
         contentInput.style.fontSize = settings.fontSize + 'px';
+        lineNumbers.style.fontFamily = fontMap[settings.fontFamily] || fontMap.default;
+        lineNumbers.style.fontSize = settings.fontSize + 'px';
+      }
+
+      function updateLineNumbers() {
+        const lines = contentInput.value.split('\\n');
+        const rows = [];
+
+        syncLineMeasure();
+
+        lines.forEach((line, index) => {
+          const wrappedRows = getWrappedRowCount(line);
+          rows.push(String(index + 1));
+
+          for (let row = 1; row < wrappedRows; row += 1) {
+            rows.push('');
+          }
+        });
+
+        lineNumbers.textContent = rows.join('\\n') || '1';
+        lineNumbers.style.minWidth = Math.max(3, String(lines.length).length + 1) + 'ch';
+        lineNumbers.scrollTop = contentInput.scrollTop;
+      }
+
+      function syncLineMeasure() {
+        const style = window.getComputedStyle(contentInput);
+        const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+        const measureWidth = Math.max(1, contentInput.clientWidth - horizontalPadding);
+
+        Object.assign(lineMeasure.style, {
+          position: 'absolute',
+          top: '-10000px',
+          left: '-10000px',
+          visibility: 'hidden',
+          boxSizing: 'border-box',
+          width: measureWidth + 'px',
+          minHeight: '0',
+          height: 'auto',
+          padding: '0',
+          border: '0',
+          overflow: 'hidden',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'break-word',
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          fontStyle: style.fontStyle,
+          fontWeight: style.fontWeight,
+          letterSpacing: style.letterSpacing,
+          lineHeight: style.lineHeight
+        });
+      }
+
+      function getWrappedRowCount(line) {
+        const style = window.getComputedStyle(contentInput);
+        const lineHeight = parseFloat(style.lineHeight) || settings.fontSize * 1.45;
+        lineMeasure.textContent = line || ' ';
+        return Math.max(1, Math.round(lineMeasure.scrollHeight / lineHeight));
       }
 
       function saveSettings() {
@@ -812,6 +665,7 @@ class NotesViewProvider {
         });
         renderSettings();
         applySettings();
+        updateLineNumbers();
         vscode.postMessage({ type: 'saveSettings', settings });
       }
 
@@ -819,6 +673,10 @@ class NotesViewProvider {
       titleInput.addEventListener('blur', flushPendingSaves);
       contentInput.addEventListener('input', scheduleContentSave);
       contentInput.addEventListener('blur', flushPendingSaves);
+      contentInput.addEventListener('scroll', () => {
+        lineNumbers.scrollTop = contentInput.scrollTop;
+      });
+      window.addEventListener('resize', updateLineNumbers);
       selectFolderButton.addEventListener('click', () => vscode.postMessage({ type: 'selectFolder' }));
       fontFamilyInput.addEventListener('change', saveSettings);
       customFontInput.addEventListener('input', saveSettings);

@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Preview — Meu Bloco de Notas</title>
+  <link id="webview-css" rel="stylesheet" href="../media/webview.css">
+  <style>
+    /* Apenas o chrome do preview (nao vai para a extensao) */
+    body.preview-root {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #1e1e1e;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #ccc;
+      overflow: auto;
+    }
+
+    .preview-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: #252526;
+      border-bottom: 1px solid #3c3c3c;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .preview-toolbar strong {
+      margin-right: 4px;
+      color: #fff;
+    }
+
+    .preview-toolbar button,
+    .preview-toolbar label {
+      font: inherit;
+      font-size: 12px;
+    }
+
+    .preview-toolbar button {
+      border: 1px solid #3c3c3c;
+      border-radius: 4px;
+      padding: 4px 10px;
+      background: #333;
+      color: #ddd;
+      cursor: pointer;
+    }
+
+    .preview-toolbar button:hover { background: #3a3a3a; }
+    .preview-toolbar button.active {
+      background: #0e639c;
+      border-color: #1177bb;
+      color: #fff;
+    }
+
+    .preview-toolbar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    .preview-hint {
+      margin-left: auto;
+      font-size: 11px;
+      color: #888;
+    }
+
+    .preview-stage {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px;
+      gap: 0;
+    }
+
+    .vscode-sidebar {
+      width: 320px;
+      min-height: 520px;
+      max-height: calc(100vh - 120px);
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #3c3c3c;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+
+    .vscode-sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0px 7px;
+      /* background: var(--vscode-sideBar-background); */
+      /* border-bottom: 1px solid rgba(128, 128, 128, 0.2); */
+      color: var(--vscode-foreground);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .vscode-sidebar-actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    .vscode-sidebar-actions button {
+      border: 0;
+      border-radius: 3px;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      background: transparent;
+      color: var(--vscode-icon-foreground);
+      cursor: default;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .vscode-sidebar-body {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .vscode-sidebar-body .app {
+      height: 100%;
+    }
+
+    /* Temas VS Code simulados */
+    .theme-dark {
+      --vscode-foreground: #cccccc;
+      --vscode-sideBar-background: #252526;
+      --vscode-sideBar-foreground: #cccccc99;
+      --vscode-font-family: "Segoe UI", sans-serif;
+      --vscode-font-size: 13px;
+      --vscode-list-hoverForeground: #ffffff;
+      --vscode-icon-foreground: #c5c5c5;
+      --vscode-errorForeground: #f48771;
+      --vscode-toolbar-hoverBackground: rgba(90, 93, 94, 0.31);
+      --vscode-descriptionForeground: #cccccc80;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-background: #0e639c;
+      --vscode-input-foreground: #cccccc;
+      --vscode-input-background: #3c3c3c;
+      --vscode-input-border: #3c3c3c;
+      --vscode-focusBorder: #007fd4;
+      --vscode-editor-font-family: Consolas, "Courier New", monospace;
+    }
+
+    .theme-light {
+      --vscode-foreground: #333333;
+      --vscode-sideBar-background: #f3f3f3;
+      --vscode-sideBar-foreground: #616161;
+      --vscode-font-family: "Segoe UI", sans-serif;
+      --vscode-font-size: 13px;
+      --vscode-list-hoverForeground: #000000;
+      --vscode-icon-foreground: #424242;
+      --vscode-errorForeground: #a1260d;
+      --vscode-toolbar-hoverBackground: rgba(0, 0, 0, 0.08);
+      --vscode-descriptionForeground: #717171;
+      --vscode-button-foreground: #ffffff;
+      --vscode-button-background: #0078d4;
+      --vscode-input-foreground: #333333;
+      --vscode-input-background: #ffffff;
+      --vscode-input-border: #cecece;
+      --vscode-focusBorder: #007fd4;
+      --vscode-editor-font-family: Consolas, "Courier New", monospace;
+    }
+  </style>
+</head>
+<body class="preview-root theme-dark">
+  <div class="preview-toolbar">
+    <strong>Preview</strong>
+    <button type="button" data-screen="list" class="active">Lista</button>
+    <button type="button" data-screen="editor">Editor</button>
+    <button type="button" data-screen="settings">Configuracoes</button>
+    <button type="button" data-screen="no-folder">Sem pasta</button>
+    <button type="button" data-screen="empty">Lista vazia</button>
+    <button type="button" id="themeToggle">Tema claro</button>
+    <label><input type="checkbox" id="autoReloadCss" checked> Auto-recarregar CSS</label>
+    <span class="preview-hint">Edite <code>media/webview.css</code> e salve</span>
+  </div>
+
+  <div class="preview-stage">
+    <div class="vscode-sidebar theme-dark" id="sidebarFrame">
+      <div class="vscode-sidebar-header">
+        <span id="viewTitle">Bloco de Notas</span>
+        <div class="vscode-sidebar-actions" id="viewActions">
+          <button type="button" title="Criar nota">+</button>
+          <button type="button" title="Configuracoes">&#9881;</button>
+        </div>
+      </div>
+      <div class="vscode-sidebar-body">
+        <div class="app">
+          <section class="screen" id="listScreen">
+            <div class="notesList" id="notesList" aria-label="Notas"></div>
+          </section>
+
+          <section class="screen hidden" id="editorScreen">
+            <input class="titleInput" id="titleInput" type="text" aria-label="Nome da nota" maxlength="80">
+            <div class="editor">
+              <div class="editorInputWrap">
+                <div class="lineNumbers" id="lineNumbers" aria-hidden="true">1</div>
+                <textarea id="contentInput" spellcheck="true" placeholder="Escreva suas anotacoes em Markdown..."></textarea>
+              </div>
+              <span class="status" id="status">Pronto</span>
+            </div>
+          </section>
+
+          <section class="screen hidden" id="settingsScreen">
+            <div class="settingsPanel">
+              <div class="settingRow">
+                <label>Pasta das notas</label>
+                <button class="folderButton" type="button">Escolher pasta</button>
+                <span class="folderPath" id="folderPath">C:\Users\voce\Documents\notas</span>
+              </div>
+              <div class="settingRow">
+                <label for="fontFamilyInput">Fonte</label>
+                <select id="fontFamilyInput">
+                  <option value="default">Padrao do editor</option>
+                  <option value="monospace">Monospace</option>
+                  <option value="sans">Sans serif</option>
+                  <option value="serif">Serif</option>
+                  <option value="custom">Fonte manual</option>
+                </select>
+                <input class="hidden" id="customFontInput" type="text" placeholder="Ex: JetBrains Mono, Fira Code">
+              </div>
+              <div class="settingRow">
+                <label for="fontSizeInput">Tamanho</label>
+                <div class="sizeControl">
+                  <input id="fontSizeInput" type="range" min="12" max="24" step="1" value="14">
+                  <input id="fontSizeNumberInput" type="number" min="12" max="24" step="1" value="14">
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MOCK_NOTES = [
+      {
+        id: 'ideias-projeto.md',
+        title: 'Ideias do projeto',
+        content: '# Ideias\n\n- Melhorar a lista de notas\n- Adicionar tags\n- Preview de Markdown\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Esta linha e longa o suficiente para testar quebra de linha nos numeros.'
+      },
+      {
+        id: 'reuniao-segunda.md',
+        title: 'Reuniao segunda',
+        content: '## Pendencias\n\n1. Revisar CSS\n2. Testar no Cursor\n3. Publicar extensao'
+      },
+      {
+        id: 'lista-compras.md',
+        title: 'Lista de compras',
+        content: '- Cafe\n- Leite\n- Pao'
+      }
+    ];
+
+    const listScreen = document.getElementById('listScreen');
+    const editorScreen = document.getElementById('editorScreen');
+    const settingsScreen = document.getElementById('settingsScreen');
+    const notesList = document.getElementById('notesList');
+    const titleInput = document.getElementById('titleInput');
+    const contentInput = document.getElementById('contentInput');
+    const lineNumbers = document.getElementById('lineNumbers');
+    const viewTitle = document.getElementById('viewTitle');
+    const viewActions = document.getElementById('viewActions');
+    const sidebarFrame = document.getElementById('sidebarFrame');
+    const fontFamilyInput = document.getElementById('fontFamilyInput');
+    const customFontInput = document.getElementById('customFontInput');
+    const fontSizeInput = document.getElementById('fontSizeInput');
+    const fontSizeNumberInput = document.getElementById('fontSizeNumberInput');
+    const lineMeasure = document.createElement('div');
+
+    let screen = 'list';
+    let activeNoteId = MOCK_NOTES[0].id;
+    let settings = { fontFamily: 'monospace', customFontFamily: '', fontSize: 14 };
+
+    lineMeasure.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(lineMeasure);
+
+    function getActiveNote() {
+      return MOCK_NOTES.find((note) => note.id === activeNoteId) || MOCK_NOTES[0];
+    }
+
+    function renderChrome() {
+      if (screen === 'editor') {
+        viewTitle.textContent = getActiveNote().title;
+        viewActions.innerHTML = '<button type="button" title="Voltar">&larr;</button>';
+      } else if (screen === 'settings') {
+        viewTitle.textContent = 'Configuracoes';
+        viewActions.innerHTML = '<button type="button" title="Voltar">&larr;</button>';
+      } else {
+        viewTitle.textContent = 'Bloco de Notas';
+        viewActions.innerHTML = `
+          <button type="button" title="Criar nota">+</button>
+          <button type="button" title="Configuracoes">&#9881;</button>
+        `;
+      }
+    }
+
+    function renderList() {
+      notesList.innerHTML = '';
+
+      MOCK_NOTES.forEach((note) => {
+        const item = document.createElement('div');
+        item.className = 'noteItem' + (note.id === activeNoteId ? ' active' : '');
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
+
+        const name = document.createElement('span');
+        name.className = 'noteName';
+        name.textContent = note.title;
+        item.appendChild(name);
+
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'noteDeleteButton';
+        deleteButton.type = 'button';
+        deleteButton.title = 'Excluir nota';
+        deleteButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 0h24v24H0z" fill="none"></path><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16m-10 4v6m4-6v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"></path></svg>';
+        item.appendChild(deleteButton);
+
+        item.addEventListener('click', () => {
+          activeNoteId = note.id;
+          setScreen('editor');
+        });
+
+        notesList.appendChild(item);
+      });
+    }
+
+    function renderEmpty() {
+      notesList.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'emptyState';
+      empty.textContent = 'Nenhum arquivo .md nesta pasta. Clique no + para criar uma nota.';
+      notesList.appendChild(empty);
+    }
+
+    function renderNoFolder() {
+      notesList.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'emptyState';
+      empty.textContent = 'Escolha uma pasta para ler e salvar suas notas .md.';
+      const button = document.createElement('button');
+      button.className = 'folderButton';
+      button.type = 'button';
+      button.textContent = 'Escolher pasta';
+      notesList.appendChild(empty);
+      notesList.appendChild(button);
+    }
+
+    function applySettings() {
+      const fontMap = {
+        default: 'var(--vscode-editor-font-family, var(--vscode-font-family))',
+        monospace: 'var(--vscode-editor-font-family, Consolas, monospace)',
+        sans: 'var(--vscode-font-family, Arial, sans-serif)',
+        serif: 'Georgia, serif',
+        custom: settings.customFontFamily || 'var(--vscode-editor-font-family, var(--vscode-font-family))'
+      };
+
+      contentInput.style.fontFamily = fontMap[settings.fontFamily] || fontMap.default;
+      contentInput.style.fontSize = settings.fontSize + 'px';
+      lineNumbers.style.fontFamily = fontMap[settings.fontFamily] || fontMap.default;
+      lineNumbers.style.fontSize = settings.fontSize + 'px';
+    }
+
+    function syncLineMeasure() {
+      const style = window.getComputedStyle(contentInput);
+      const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const measureWidth = Math.max(1, contentInput.clientWidth - horizontalPadding);
+
+      Object.assign(lineMeasure.style, {
+        position: 'absolute',
+        top: '-10000px',
+        left: '-10000px',
+        visibility: 'hidden',
+        boxSizing: 'border-box',
+        width: measureWidth + 'px',
+        minHeight: '0',
+        height: 'auto',
+        padding: '0',
+        border: '0',
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'break-word',
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontStyle: style.fontStyle,
+        fontWeight: style.fontWeight,
+        letterSpacing: style.letterSpacing,
+        lineHeight: style.lineHeight
+      });
+    }
+
+    function getWrappedRowCount(line) {
+      const style = window.getComputedStyle(contentInput);
+      const lineHeight = parseFloat(style.lineHeight) || settings.fontSize * 1.45;
+      lineMeasure.textContent = line || ' ';
+      return Math.max(1, Math.round(lineMeasure.scrollHeight / lineHeight));
+    }
+
+    function updateLineNumbers() {
+      const lines = contentInput.value.split('\n');
+      const rows = [];
+
+      syncLineMeasure();
+
+      lines.forEach((line, index) => {
+        rows.push(String(index + 1));
+        for (let row = 1; row < getWrappedRowCount(line); row += 1) {
+          rows.push('');
+        }
+      });
+
+      lineNumbers.textContent = rows.join('\n') || '1';
+      lineNumbers.style.minWidth = Math.max(3, String(lines.length).length + 1) + 'ch';
+      lineNumbers.scrollTop = contentInput.scrollTop;
+    }
+
+    function render() {
+      listScreen.classList.toggle('hidden', screen !== 'list');
+      editorScreen.classList.toggle('hidden', screen !== 'editor');
+      settingsScreen.classList.toggle('hidden', screen !== 'settings');
+
+      if (screen === 'list') {
+        if (document.body.dataset.listMode === 'no-folder') {
+          renderNoFolder();
+        } else if (document.body.dataset.listMode === 'empty') {
+          renderEmpty();
+        } else {
+          renderList();
+        }
+      }
+
+      if (screen === 'editor') {
+        const note = getActiveNote();
+        titleInput.value = note.title;
+        contentInput.value = note.content;
+        applySettings();
+        updateLineNumbers();
+      }
+
+      if (screen === 'settings') {
+        fontFamilyInput.value = settings.fontFamily;
+        customFontInput.value = settings.customFontFamily;
+        customFontInput.classList.toggle('hidden', settings.fontFamily !== 'custom');
+        fontSizeInput.value = String(settings.fontSize);
+        fontSizeNumberInput.value = String(settings.fontSize);
+      }
+
+      renderChrome();
+    }
+
+    function setScreen(nextScreen) {
+      screen = nextScreen;
+      document.querySelectorAll('[data-screen]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.screen === nextScreen);
+      });
+      render();
+    }
+
+    document.querySelectorAll('[data-screen]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const next = button.dataset.screen;
+        if (next === 'no-folder' || next === 'empty') {
+          document.body.dataset.listMode = next;
+          setScreen('list');
+          return;
+        }
+        delete document.body.dataset.listMode;
+        setScreen(next);
+      });
+    });
+
+    document.getElementById('themeToggle').addEventListener('click', (event) => {
+      const isDark = document.body.classList.contains('theme-dark');
+      document.body.classList.toggle('theme-dark', !isDark);
+      document.body.classList.toggle('theme-light', isDark);
+      sidebarFrame.classList.toggle('theme-dark', !isDark);
+      sidebarFrame.classList.toggle('theme-light', isDark);
+      event.target.textContent = isDark ? 'Tema escuro' : 'Tema claro';
+    });
+
+    fontFamilyInput.addEventListener('change', () => {
+      settings.fontFamily = fontFamilyInput.value;
+      customFontInput.classList.toggle('hidden', settings.fontFamily !== 'custom');
+      applySettings();
+      updateLineNumbers();
+    });
+
+    fontSizeInput.addEventListener('input', () => {
+      settings.fontSize = Number(fontSizeInput.value);
+      fontSizeNumberInput.value = fontSizeInput.value;
+      applySettings();
+      updateLineNumbers();
+    });
+
+    fontSizeNumberInput.addEventListener('input', () => {
+      settings.fontSize = Number(fontSizeNumberInput.value);
+      fontSizeInput.value = fontSizeNumberInput.value;
+      applySettings();
+      updateLineNumbers();
+    });
+
+    contentInput.addEventListener('input', updateLineNumbers);
+    contentInput.addEventListener('scroll', () => {
+      lineNumbers.scrollTop = contentInput.scrollTop;
+    });
+    window.addEventListener('resize', updateLineNumbers);
+
+    let cssStamp = 0;
+    const cssLink = document.getElementById('webview-css');
+    const autoReloadCss = document.getElementById('autoReloadCss');
+
+    function reloadCss() {
+      cssStamp += 1;
+      cssLink.href = '../media/webview.css?t=' + cssStamp;
+    }
+
+    setInterval(() => {
+      if (autoReloadCss.checked) {
+        reloadCss();
+      }
+    }, 800);
+
+    render();
+  </script>
+</body>
+</html>
