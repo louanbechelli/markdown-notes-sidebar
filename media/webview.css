@@ -197,7 +197,7 @@ body {
 .lineNumbers {
   flex: 0 0 auto;
   min-width: 3ch;
-  padding: 8px 6px 8px 0;
+  padding: 8px 3px 8px 0;
   border-right: 1px solid var(--vscode-input-border, transparent);
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-input-background);
