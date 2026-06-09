@@ -231,11 +231,54 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.editorFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.emojiBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.emojiButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 26px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.emojiButton:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.emojiButton:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
 .status,
 .folderPath,
 .settingRow label {
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
+}
+
+.status {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .settingsPanel {

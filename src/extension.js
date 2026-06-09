@@ -324,7 +324,10 @@ class NotesViewProvider {
           <div class="lineNumbers" id="lineNumbers" aria-hidden="true">1</div>
           <textarea id="contentInput" spellcheck="true" placeholder="Escreva suas anotacoes em Markdown..."></textarea>
         </div>
-        <span class="status" id="status">Pronto</span>
+        <div class="editorFooter">
+          <div class="emojiBar" id="emojiBar" role="toolbar" aria-label="Inserir emoji"></div>
+          <span class="status" id="status">Pronto</span>
+        </div>
       </div>
     </section>
 
@@ -374,7 +377,9 @@ class NotesViewProvider {
       const customFontInput = document.getElementById('customFontInput');
       const fontSizeInput = document.getElementById('fontSizeInput');
       const fontSizeNumberInput = document.getElementById('fontSizeNumberInput');
+      const emojiBar = document.getElementById('emojiBar');
       const lineMeasure = document.createElement('div');
+      const emojiInserts = ['⏳', '✅', '⚠️', '💬', '🛠️', '❌', '🅱️', '▶️', '🆕', '🆗', '📧'];
       let state = normalizeState(JSON.parse(decodeURIComponent('${initialState}')));
       let settings = normalizeSettings(JSON.parse(decodeURIComponent('${initialSettings}')));
       let screen = 'list';
@@ -503,6 +508,32 @@ class NotesViewProvider {
           Object.assign(note, fields);
         }
         return note;
+      }
+
+      function insertAtCursor(text) {
+        const start = contentInput.selectionStart;
+        const end = contentInput.selectionEnd;
+        const value = contentInput.value;
+        contentInput.value = value.slice(0, start) + text + value.slice(end);
+        const nextPos = start + text.length;
+        contentInput.selectionStart = nextPos;
+        contentInput.selectionEnd = nextPos;
+        contentInput.focus();
+        scheduleContentSave();
+      }
+
+      function initEmojiBar() {
+        emojiBar.innerHTML = '';
+        emojiInserts.forEach((emoji) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'emojiButton';
+          button.textContent = emoji;
+          button.title = 'Inserir ' + emoji;
+          button.addEventListener('mousedown', (event) => event.preventDefault());
+          button.addEventListener('click', () => insertAtCursor(emoji));
+          emojiBar.appendChild(button);
+        });
       }
 
       function scheduleContentSave() {
@@ -728,6 +759,7 @@ class NotesViewProvider {
         }
       });
 
+      initEmojiBar();
       renderSettings();
       applySettings();
       render();
